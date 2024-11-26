@@ -5,6 +5,7 @@ from datetime import datetime
 import logging
 import os
 from portfolio_manager import Portfolio
+from portfolio_visualizer import PortfolioVisualizer
 import sys
 
 def calculate_portfolio_metrics(portfolio: Portfolio) -> dict:
@@ -88,6 +89,14 @@ def calculate_portfolio_metrics(portfolio: Portfolio) -> dict:
     portfolio_values = pd.Series(portfolio_daily_values, index=common_dates)
     portfolio_returns = portfolio_values.pct_change()
     
+    # Create visualizations
+    visualizer = PortfolioVisualizer()
+    metrics['Visualization Files'] = {
+        'Equity Curve': visualizer.plot_equity_curve(portfolio_values, "Portfolio Equity Curve"),
+        'Drawdown': visualizer.plot_drawdown(portfolio_values, "Portfolio Drawdown Analysis"),
+        'Monthly Returns': visualizer.create_monthly_returns_heatmap(portfolio_values, "Monthly Returns Heatmap")
+    }
+    
     # Calculate annualized return
     if len(portfolio_values) > 1:
         days = (portfolio_values.index[-1] - portfolio_values.index[0]).days
@@ -148,6 +157,11 @@ def format_metrics_output(metrics: dict) -> str:
         'Quantity', 'Price', 'Avg Buy Price', 'Value', 'Return (%)', 'Weight'
     ]].round(2)
     output.append(holdings_formatted.to_string())
+    
+    output.append("\n6. VISUALIZATIONS")
+    output.append("-" * 30)
+    for visualization, file_path in metrics['Visualization Files'].items():
+        output.append(f"{visualization}: {file_path}")
     
     return "\n".join(output)
 
