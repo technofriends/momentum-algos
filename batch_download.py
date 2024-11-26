@@ -60,15 +60,30 @@ class DownloadStats:
                 'errors': self.errors
             }
 
-def get_available_symbol_files() -> Dict[int, str]:
+def get_available_symbol_files():
     """
-    Get a list of available CSV files containing symbols
+    Get a list of available CSV files containing symbols from the input_files directory
     """
-    files = {
-        1: 'nse_total_market.csv',
-        2: 'other_symbols.csv'
-    }
-    return files
+    input_dir = 'input_files'
+    # Create input_files directory if it doesn't exist
+    os.makedirs(input_dir, exist_ok=True)
+    
+    # Get all CSV files from input_files directory
+    files = []
+    try:
+        for file in os.listdir(input_dir):
+            if file.endswith('.csv'):
+                files.append(os.path.join(input_dir, file))
+    except Exception as e:
+        logger.error(f"Error reading input directory: {str(e)}")
+        return []
+    
+    if not files:
+        print("\nNo CSV files found in input_files directory!")
+        print("Please add CSV files with stock symbols to the input_files directory.")
+        return []
+    
+    return sorted(files)
 
 def read_symbols_from_file(filename: str) -> List[str]:
     """
@@ -77,41 +92,45 @@ def read_symbols_from_file(filename: str) -> List[str]:
     try:
         df = pd.read_csv(filename)
         
-        # Log file structure for debugging
-        debug_info = (
-            f"File Structure:\n"
-            f"Columns: {df.columns.tolist()}\n"
-            f"Shape: {df.shape}\n"
-            f"First few rows:\n{df.head().to_string()}"
-        )
+        # Try common column names for symbols
+        symbol_columns = ['Scrip', 'Symbol', 'SYMBOL', 'symbol', 'Ticker', 'TICKER', 'ticker']
+        found_column = None
         
-        # Check if 'Scrip' column exists
-        if 'Scrip' in df.columns:
-            symbols = df['Scrip'].tolist()
-        else:
-            # Use the first column
-            logger.error(
-                f"'Scrip' column not found in {filename}, using first column: {df.columns[0]}",
-                debug_info=debug_info
-            )
-            symbols = df.iloc[:, 0].tolist()
+        for col in symbol_columns:
+            if col in df.columns:
+                found_column = col
+                break
         
-        # Remove any empty or NaN values
-        symbols = [str(s).strip() for s in symbols if pd.notna(s) and str(s).strip()]
+        if found_column is None:
+            # If no standard column found, use the first column
+            found_column = df.columns[0]
+            logger.warning(f"No standard symbol column found in {filename}. Using first column: {found_column}")
         
-        if not symbols:
-            logger.error(
-                f"No valid symbols found in {filename}",
-                debug_info=debug_info
-            )
-            return []
+        # Get the symbols and handle different formats
+        raw_symbols = df[found_column].astype(str).str.strip().tolist()
+        symbols = []
+        
+        for symbol in raw_symbols:
+            if not symbol or str(symbol).lower() == 'nan':
+                continue
+                
+            # Remove trailing comma if present
+            symbol = symbol.rstrip(',')
             
+            # Handle pipe-separated format (e.g., "Nifty 50|26000")
+            if '|' in symbol:
+                symbol = symbol.split('|')[0].strip()
+            
+            if symbol:  # Only add non-empty symbols
+                symbols.append(symbol)
+        
+        logger.info(f"Successfully read {len(symbols)} symbols from {filename}")
         return symbols
         
     except Exception as e:
-        debug_info = f"Traceback:\n{traceback.format_exc()}"
+        debug_info = traceback.format_exc()
         logger.error(
-            f"Error reading file {filename}: {str(e)}",
+            f"Error reading symbols from {filename}",
             debug_info=debug_info
         )
         return []
@@ -123,28 +142,39 @@ def get_user_file_selection() -> List[int]:
     """
     files = get_available_symbol_files()
     
+    if not files:
+        print("\nNo CSV files found in input_files directory!")
+        print("Please add CSV files with stock symbols to the input_files directory.")
+        return []
+    
     while True:
         print("\nAvailable symbol files:")
-        for num, filename in files.items():
-            print(f"{num}. {filename}")
+        for i, file in enumerate(files, 1):
+            # Get the number of symbols in the file
+            symbols = read_symbols_from_file(file)
+            filename = os.path.basename(file)
+            print(f"{i}. {filename} ({len(symbols)} symbols)")
         
-        print("\nEnter file number(s) to process (examples: '1' or '2' or '1,2'):")
-        selection = input("> ").strip()
+        print("\nEnter file numbers to process (comma-separated, e.g., '1,2')")
+        print("Or press Enter to process all files")
+        print("Or 'q' to quit")
+        
+        choice = input("\nYour choice: ").strip().lower()
+        
+        if choice == 'q':
+            return []
+        
+        if choice == '':
+            return list(range(1, len(files) + 1))
         
         try:
-            # Handle comma-separated input
-            if ',' in selection:
-                selected_numbers = [int(x.strip()) for x in selection.split(',')]
+            selections = [int(x.strip()) for x in choice.split(',')]
+            if all(1 <= x <= len(files) for x in selections):
+                return selections
             else:
-                selected_numbers = [int(selection)]
-            
-            # Validate selections
-            if all(num in files for num in selected_numbers):
-                return selected_numbers
-            else:
-                print("Invalid selection. Please enter valid file numbers.")
+                print("\nError: Please enter valid file numbers!")
         except ValueError:
-            print("Invalid input. Please enter numbers only.")
+            print("\nError: Please enter numbers separated by commas!")
 
 def download_with_retry(symbol: str, stats: DownloadStats) -> Dict:
     """
@@ -273,7 +303,7 @@ def batch_download_stocks(file_numbers=None):
         
         # Read symbols from selected files
         for file_num in file_numbers:
-            filename = files[file_num]
+            filename = files[file_num - 1]  # Adjust index since list is 0-based
             print(f"\nReading symbols from {filename}...")
             symbols = read_symbols_from_file(filename)
             all_symbols.extend(symbols)
@@ -294,5 +324,4 @@ def batch_download_stocks(file_numbers=None):
         print("Check error.log for details")
 
 if __name__ == "__main__":
-    # Show file selection menu
     batch_download_stocks()
