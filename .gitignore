@@ -36,9 +36,11 @@ env/
 
 # Project specific
 data/
-input_files/
+input_files/*
+!input_files/other_symbols.csv
 logs/
-*.csv
+txn_files/*
+!txn_files/.gitkeep
 *.log
 error.log
 error_report.json
