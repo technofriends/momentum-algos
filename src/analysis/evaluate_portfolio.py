@@ -17,6 +17,8 @@ def calculate_portfolio_metrics(portfolio: Portfolio) -> dict:
         'Total Return (%)': 'N/A',
         'Number of Positions': 0,
         'Annualized Return (%)': 'N/A',
+        'Daily Volatility (%)': 'N/A',
+        'Annualized Volatility (%)': 'N/A',
         'Sharpe Ratio': 'N/A',
         'Max Drawdown (%)': 'N/A',
         'Beta': 'N/A',
@@ -29,6 +31,22 @@ def calculate_portfolio_metrics(portfolio: Portfolio) -> dict:
         logging.error("Portfolio value DataFrame is None or empty")
         return metrics
     
+    # First calculate holdings metrics to get accurate total value and investment
+    holdings_df = calculate_holdings_metrics(portfolio)
+    
+    if not holdings_df.empty:
+        # Calculate total value and investment from holdings
+        total_value = holdings_df['Market Value'].sum()
+        total_investment = holdings_df['Cost Basis'].sum()
+        
+        metrics['Total Value'] = total_value
+        metrics['Total Investment'] = total_investment
+        
+        # Calculate total return using the actual totals
+        if total_investment > 0:
+            total_return = ((total_value - total_investment) / total_investment) * 100
+            metrics['Total Return (%)'] = total_return
+    
     total_value_series = portfolio.portfolio_value['total_value']
     logging.info(f"Total value series length: {len(total_value_series)}")
     logging.info(f"Total value series range: {total_value_series.min()} to {total_value_series.max()}")
@@ -36,89 +54,195 @@ def calculate_portfolio_metrics(portfolio: Portfolio) -> dict:
     
     # Get latest portfolio value
     latest_value = total_value_series.iloc[-1]
-    metrics['Total Value'] = latest_value
-    
-    # Calculate total investment
-    total_investment = 0
-    for txn in portfolio.transactions:
-        if txn.transaction_type == 'TRADE':
-            total_investment += txn.quantity * txn.price
-    metrics['Total Investment'] = total_investment
-    
-    # Calculate total return
-    if total_investment > 0:
-        total_return = ((latest_value - total_investment) / total_investment) * 100
-        metrics['Total Return (%)'] = total_return
     
     # Calculate annualized return
     if len(total_value_series) > 1:
         days = (total_value_series.index[-1] - total_value_series.index[0]).days
         if days > 0:
-            total_return_decimal = (latest_value - total_investment) / total_investment
+            total_return_decimal = (latest_value - metrics['Total Investment']) / metrics['Total Investment']
             annualized_return = ((1 + total_return_decimal) ** (365 / days) - 1) * 100
             metrics['Annualized Return (%)'] = annualized_return
     
-    # Calculate Sharpe Ratio
+    # Calculate Sharpe Ratio and Volatility
     if len(total_value_series) > 1:
         daily_returns = total_value_series.pct_change().dropna()
         if len(daily_returns) > 0:
-            volatility = daily_returns.std() * np.sqrt(252)  # Annualized volatility
-            if volatility > 0:
-                avg_return = daily_returns.mean() * 252  # Annualized return
+            # Calculate daily volatility (standard deviation of returns)
+            daily_vol = daily_returns.std() * 100  # Convert to percentage
+            
+            # Calculate annualized volatility
+            # For daily data, multiply by sqrt(252) - number of trading days in a year
+            annualized_vol = daily_vol * np.sqrt(252)
+            
+            # Only set metrics if we have reasonable values (less than 100% daily volatility)
+            if daily_vol < 100:
+                metrics['Daily Volatility (%)'] = daily_vol
+                metrics['Annualized Volatility (%)'] = annualized_vol
+                
+                # Calculate Sharpe ratio using excess returns over risk-free rate
                 risk_free_rate = 0.05  # 5% annual risk-free rate
-                sharpe_ratio = (avg_return - risk_free_rate) / volatility
-                metrics['Sharpe Ratio'] = sharpe_ratio
+                excess_return = (daily_returns.mean() * 252) - risk_free_rate  # Annualized excess return
+                if annualized_vol > 0:
+                    sharpe_ratio = excess_return / (annualized_vol / 100)  # Convert vol back to decimal
+                    metrics['Sharpe Ratio'] = sharpe_ratio
+            
+            # Calculate maximum drawdown
+            rolling_max = total_value_series.expanding().max()
+            drawdown = ((total_value_series - rolling_max) / rolling_max) * 100
+            max_drawdown = drawdown.min()
+            if not np.isnan(max_drawdown):
+                metrics['Max Drawdown (%)'] = max_drawdown
+    
+    # Calculate number of current positions
+    if portfolio.holdings is not None:
+        latest_holdings = portfolio.holdings.iloc[-1]
+        current_positions = len(latest_holdings[latest_holdings > 0])
+        metrics['Number of Positions'] = current_positions
     
     return metrics
+
+def calculate_holdings_metrics(portfolio: Portfolio) -> pd.DataFrame:
+    """Calculate detailed metrics for each holding"""
+    if portfolio.holdings is None or portfolio.holdings.empty:
+        return pd.DataFrame()
+        
+    # Get latest holdings
+    latest_holdings = portfolio.holdings.iloc[-1]
+    
+    # Initialize holdings metrics
+    holdings_data = []
+    total_value = portfolio.portfolio_value['total_value'].iloc[-1]
+    
+    # Calculate metrics for each holding
+    for symbol in latest_holdings.index:
+        qty = latest_holdings[symbol]
+        if qty <= 0:  # Skip positions that have been closed
+            continue
+            
+        # Get current price
+        current_price = portfolio.price_data[symbol].iloc[-1]
+        
+        # Calculate average buying price
+        buy_trades = [t for t in portfolio.transactions 
+                     if t.symbol.lower() == symbol.lower() and t.quantity > 0]
+        total_cost = sum(t.quantity * t.price for t in buy_trades)
+        total_qty = sum(t.quantity for t in buy_trades)
+        avg_price = total_cost / total_qty if total_qty > 0 else 0
+        
+        # Calculate returns
+        position_value = qty * current_price
+        cost_basis = qty * avg_price
+        absolute_return = position_value - cost_basis
+        return_pct = (absolute_return / cost_basis * 100) if cost_basis > 0 else 0
+        weight = (position_value / total_value * 100) if total_value > 0 else 0
+        
+        holdings_data.append({
+            'Symbol': symbol.upper(),
+            'Quantity': qty,
+            'Avg Price': avg_price,
+            'Current Price': current_price,
+            'Market Value': position_value,
+            'Cost Basis': cost_basis,
+            'Absolute Return': absolute_return,
+            'Return %': return_pct,
+            'Weight %': weight
+        })
+    
+    # Convert to DataFrame and sort by weight
+    holdings_df = pd.DataFrame(holdings_data)
+    if not holdings_df.empty:
+        holdings_df = holdings_df.sort_values('Weight %', ascending=False)
+        
+        # Format numeric columns
+        holdings_df['Avg Price'] = holdings_df['Avg Price'].round(2)
+        holdings_df['Current Price'] = holdings_df['Current Price'].round(2)
+        holdings_df['Market Value'] = holdings_df['Market Value'].round(2)
+        holdings_df['Cost Basis'] = holdings_df['Cost Basis'].round(2)
+        holdings_df['Absolute Return'] = holdings_df['Absolute Return'].round(2)
+        holdings_df['Return %'] = holdings_df['Return %'].round(2)
+        holdings_df['Weight %'] = holdings_df['Weight %'].round(2)
+    
+    return holdings_df
 
 def format_metrics_output(metrics: dict) -> str:
     """Format metrics for display"""
     output = []
+    
+    # Add timestamp header
+    current_time = datetime.now()
+    output.append("=" * 50)
+    output.append(f"Portfolio Evaluation Report")
+    output.append(f"Generated on: {current_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    output.append("=" * 50)
+    output.append("")  # Empty line for better readability
+    
     output.append("Portfolio Metrics:")
     output.append("-----------------")
     
-    # Basic metrics
-    if 'Total Value' in metrics:
+    # Format basic metrics
+    if metrics['Total Value'] != 'N/A':
         output.append(f"Total Value: ₹{metrics['Total Value']:,.2f}")
-    if 'Total Investment' in metrics:
-        output.append(f"Total Investment: ₹{metrics['Total Investment']:,.2f}")
-    if 'Total Return' in metrics:
-        output.append(f"Total Return: {metrics['Total Return']:.2f}%")
-    if 'Number of Positions' in metrics:
-        output.append(f"Number of Positions: {metrics['Number of Positions']}")
-    
-    # Performance metrics
-    if 'Annualized Return' in metrics and metrics['Annualized Return'] != 'N/A':
-        output.append(f"Annualized Return: {metrics['Annualized Return']:.2f}%")
     else:
-        output.append("Annualized Return: N/A")
+        output.append(f"Total Value: {metrics['Total Value']}")
         
-    if 'Sharpe Ratio' in metrics and metrics['Sharpe Ratio'] != 'N/A':
+    if metrics['Total Investment'] != 'N/A':
+        output.append(f"Total Investment: ₹{metrics['Total Investment']:,.2f}")
+    else:
+        output.append(f"Total Investment: {metrics['Total Investment']}")
+        
+    if metrics['Total Return (%)'] != 'N/A':
+        output.append(f"Total Return: {metrics['Total Return (%)']:.2f}%")
+    else:
+        output.append(f"Total Return: {metrics['Total Return (%)']}")
+        
+    output.append(f"Number of Positions: {metrics['Number of Positions']}")
+    
+    if metrics['Annualized Return (%)'] != 'N/A':
+        output.append(f"Annualized Return: {metrics['Annualized Return (%)']:.2f}%")
+    else:
+        output.append(f"Annualized Return: {metrics['Annualized Return (%)']}")
+        
+    if metrics['Daily Volatility (%)'] != 'N/A':
+        output.append(f"Daily Volatility: {metrics['Daily Volatility (%)']:.2f}%")
+    else:
+        output.append(f"Daily Volatility: {metrics['Daily Volatility (%)']}")
+        
+    if metrics['Annualized Volatility (%)'] != 'N/A':
+        output.append(f"Annualized Volatility: {metrics['Annualized Volatility (%)']:.2f}%")
+    else:
+        output.append(f"Annualized Volatility: {metrics['Annualized Volatility (%)']}")
+        
+    if metrics['Sharpe Ratio'] != 'N/A':
         output.append(f"Sharpe Ratio: {metrics['Sharpe Ratio']:.2f}")
     else:
-        output.append("Sharpe Ratio: N/A")
+        output.append(f"Sharpe Ratio: {metrics['Sharpe Ratio']}")
         
-    if 'Max Drawdown' in metrics and metrics['Max Drawdown'] != 'N/A':
-        output.append(f"Maximum Drawdown: {metrics['Max Drawdown']:.2f}%")
+    if metrics['Max Drawdown (%)'] != 'N/A':
+        output.append(f"Maximum Drawdown: {metrics['Max Drawdown (%)']:.2f}%")
     else:
-        output.append("Maximum Drawdown: N/A")
-        
-    if 'Beta' in metrics and metrics['Beta'] != 'N/A':
-        output.append(f"Beta: {metrics['Beta']:.2f}")
-    else:
-        output.append("Beta: N/A")
-        
-    if 'Alpha' in metrics and metrics['Alpha'] != 'N/A':
-        output.append(f"Alpha: {metrics['Alpha']:.2f}%")
-    else:
-        output.append("Alpha: N/A")
+        output.append(f"Maximum Drawdown: {metrics['Max Drawdown (%)']}")
     
-    # Holdings table
-    if 'Holdings' in metrics and not metrics['Holdings'].empty:
-        output.append("\nCurrent Holdings:")
-        output.append("----------------")
-        holdings_str = metrics['Holdings'].to_string()
+    # Add detailed holdings information
+    if not metrics['Holdings'].empty:
+        output.append("\nHoldings Details:")
+        output.append("-----------------")
+        holdings_str = metrics['Holdings'].to_string(index=False)
         output.append(holdings_str)
+        
+        # Log holdings details
+        logging.info("Current Portfolio Holdings:")
+        for _, row in metrics['Holdings'].iterrows():
+            holding_info = (
+                f"Symbol: {row['Symbol']:12} "
+                f"Qty: {row['Quantity']:8.2f} "
+                f"Avg Price: ₹{row['Avg Price']:10,.2f} "
+                f"Current: ₹{row['Current Price']:10,.2f} "
+                f"Cost: ₹{row['Cost Basis']:12,.2f} "
+                f"Value: ₹{row['Market Value']:12,.2f} "
+                f"Weight: {row['Weight %']:6.2f}% "
+                f"Return: {row['Return %']:7.2f}%"
+            )
+            logging.info(holding_info)
     
     return "\n".join(output)
 
@@ -173,6 +297,9 @@ def main():
         
         # Calculate metrics
         metrics = calculate_portfolio_metrics(portfolio)
+        
+        # Add holdings information
+        metrics['Holdings'] = calculate_holdings_metrics(portfolio)
         
         # Create visualizations
         visualizer = PortfolioVisualizer()
