@@ -1,3 +1,34 @@
+"""
+Portfolio Management System
+
+This module provides a comprehensive portfolio management system for tracking and analyzing
+stock investments. It handles transaction processing, position tracking, and portfolio
+valuation using historical price data.
+
+Key Components:
+    - Transaction: Data class for individual stock transactions
+    - Portfolio: Main class for portfolio management and analysis
+
+Features:
+    - Transaction loading and processing
+    - Real-time position tracking
+    - Historical portfolio valuation
+    - Performance metrics calculation
+    - Flexible date-based analysis
+    - Comprehensive error handling and logging
+
+Example Usage:
+    >>> portfolio = Portfolio()
+    >>> portfolio.load_transactions("transactions.csv")
+    >>> portfolio.build_holdings()
+    >>> portfolio.load_price_data()
+    >>> portfolio.calculate_portfolio_value()
+    >>> summary = portfolio.get_portfolio_summary()
+
+Author: Vaibhav Pandey
+Last Modified: 2024-01-28
+"""
+
 import pandas as pd
 from pathlib import Path
 import logging
@@ -9,6 +40,25 @@ import os
 
 @dataclass
 class Transaction:
+    """
+    Represents a single stock transaction.
+    
+    Attributes:
+        date: Transaction date
+        symbol: Stock symbol (case-insensitive)
+        quantity: Number of shares (positive for buys, negative for sells)
+        price: Price per share
+        transaction_type: Type of transaction (e.g., TRADE, SPLIT, DIVIDEND)
+        notes: Additional transaction details
+        
+    Example:
+        >>> txn = Transaction(
+        ...     date=date(2023, 1, 1),
+        ...     symbol="RELIANCE",
+        ...     quantity=100,
+        ...     price=2500.0
+        ... )
+    """
     date: date
     symbol: str
     quantity: float
@@ -17,27 +67,84 @@ class Transaction:
     notes: str = ""
 
 class Portfolio:
+    """
+    Manages a stock portfolio including transactions, holdings, and valuations.
+    
+    This class provides comprehensive portfolio management functionality:
+    1. Transaction Management
+        - Load transactions from CSV files
+        - Track buys and sells
+        - Handle corporate actions
+        
+    2. Position Tracking
+        - Calculate daily holdings
+        - Track position sizes
+        - Monitor portfolio composition
+        
+    3. Portfolio Valuation
+        - Calculate position values
+        - Track total portfolio value
+        - Analyze performance metrics
+        
+    Attributes:
+        transactions: List of Transaction objects
+        holdings: Daily position sizes for each stock
+        portfolio_value: Daily values for each position and total
+        price_data: Historical price data for portfolio stocks
+        
+    Example:
+        >>> portfolio = Portfolio()
+        >>> portfolio.load_transactions("trades.csv")
+        >>> portfolio.build_holdings()
+        >>> portfolio.calculate_portfolio_value()
+        >>> print(portfolio.get_portfolio_summary())
+    """
+    
     def __init__(self, data_directory: str = "data", txn_directory: str = "transactions"):
         """
-        Initialize a new portfolio instance
+        Initialize a new portfolio instance.
         
         Args:
-            data_directory: Directory containing price data files
-            txn_directory: Directory containing transaction files
+            data_directory: Directory containing price data CSV files
+            txn_directory: Directory containing transaction CSV files
+            
+        The directory structure should be:
+            data/
+                symbol1.csv
+                symbol2.csv
+                ...
+            transactions/
+                trades.csv
+                splits.csv
+                ...
         """
         self.transactions: List[Transaction] = []
         self.holdings: Optional[pd.DataFrame] = None
         self.portfolio_value: Optional[pd.DataFrame] = None
         self.data_directory = Path(data_directory)
-        self.txn_directory = Path(txn_directory)  # Add transaction files directory
+        self.txn_directory = Path(txn_directory)
         self.price_data: Optional[pd.DataFrame] = None
         
     def load_transactions(self, transaction_file: str) -> None:
         """
-        Load transactions from a CSV file in the transactions directory
+        Load transactions from a CSV file.
+        
+        This method:
+        1. Reads the transaction CSV file
+        2. Maps columns to internal format
+        3. Creates Transaction objects
+        4. Sorts transactions by date
         
         Args:
-            transaction_file: Name of the transaction file (will be looked up in transactions directory)
+            transaction_file: Name of the CSV file in the transactions directory
+            
+        Raises:
+            FileNotFoundError: If transaction file doesn't exist
+            ValueError: If required columns are missing
+            
+        Example CSV format:
+            Entry Date,Stock Name,Qty,Entry Price
+            2023-01-01,RELIANCE,100,2500
         """
         file_path = self.txn_directory / transaction_file
         if not file_path.exists():
@@ -70,7 +177,27 @@ class Portfolio:
         logging.info(f"Loaded {len(self.transactions)} transactions")
         
     def build_holdings(self) -> pd.DataFrame:
-        """Build holdings dataframe from transactions"""
+        """
+        Calculate daily holdings for each stock.
+        
+        This method:
+        1. Creates a date range covering all transactions
+        2. Initializes holdings for each stock
+        3. Processes transactions chronologically
+        4. Updates holdings after each transaction
+        
+        Returns:
+            DataFrame with daily holdings for each stock
+            
+        Raises:
+            ValueError: If no transactions are loaded
+            
+        Example output:
+                     RELIANCE  TCS
+            2023-01-01     100    0
+            2023-01-02     100    0
+            2023-01-03     100   50
+        """
         if not self.transactions:
             raise ValueError("No transactions loaded")
             
@@ -97,7 +224,24 @@ class Portfolio:
         return self.holdings
     
     def load_price_data(self):
-        """Load price data for all symbols in the portfolio"""
+        """
+        Load historical price data for portfolio stocks.
+        
+        This method:
+        1. Identifies unique symbols in portfolio
+        2. Loads price data from CSV files
+        3. Validates data quality
+        4. Combines data into a single DataFrame
+        
+        The price data CSVs should contain:
+        - timestamp: Date in YYYY-MM-DD format
+        - close: Closing price
+        
+        Logs warnings for:
+        - Missing price files
+        - Invalid price data
+        - Date range mismatches
+        """
         if not self.transactions:
             logging.error("No transactions loaded")
             return
@@ -146,7 +290,25 @@ class Portfolio:
             logging.error("No price data was loaded for any symbol")
     
     def calculate_portfolio_value(self):
-        """Calculate the value of each position and total portfolio value over time"""
+        """
+        Calculate daily values for each position and total portfolio.
+        
+        This method:
+        1. Aligns holdings and price data dates
+        2. Calculates position values (quantity * price)
+        3. Computes total portfolio value
+        4. Tracks number of active positions
+        
+        The resulting DataFrame contains:
+        - Individual position values
+        - Total portfolio value
+        - Number of active positions
+        
+        Logs warnings for:
+        - Missing data
+        - Date mismatches
+        - Calculation issues
+        """
         if self.holdings is None or self.price_data is None:
             logging.error("Cannot calculate portfolio value: holdings or price data is missing")
             return
@@ -185,7 +347,20 @@ class Portfolio:
         return self.portfolio_value
     
     def get_portfolio_summary(self, as_of_date: Optional[date] = None) -> Dict:
-        """Get portfolio summary for a specific date"""
+        """
+        Get portfolio summary for a specific date.
+        
+        Args:
+            as_of_date: Date for summary (defaults to latest date)
+            
+        Returns:
+            Dict containing:
+            - Values for each position
+            - Total portfolio value
+            - Number of active positions
+            
+        If exact date not found, uses closest previous date.
+        """
         if self.portfolio_value is None:
             self.calculate_portfolio_value()
             

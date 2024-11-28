@@ -1,3 +1,34 @@
+"""
+Portfolio Evaluation Module
+
+This module provides comprehensive portfolio analysis and evaluation functionality.
+It calculates key performance metrics, generates detailed holdings analysis,
+and produces formatted reports.
+
+Key Components:
+    - Portfolio Metrics Calculation
+    - Holdings Analysis
+    - Performance Visualization
+    - Report Generation
+
+Metrics Calculated:
+    - Total Value and Investment
+    - Total and Annualized Returns
+    - Risk Metrics (Volatility, Sharpe Ratio)
+    - Portfolio Composition
+    - Individual Holdings Performance
+
+Example Usage:
+    >>> from src.core.portfolio_manager import Portfolio
+    >>> portfolio = Portfolio()
+    >>> portfolio.load_transactions("trades.csv")
+    >>> metrics = calculate_portfolio_metrics(portfolio)
+    >>> print(format_metrics_output(metrics))
+
+Author: Vaibhav Pandey
+Last Modified: 2024-01-28
+"""
+
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -10,6 +41,36 @@ from src.core.portfolio_manager import Portfolio
 from src.visualization.portfolio_visualizer import PortfolioVisualizer
 
 def calculate_portfolio_metrics(portfolio: Portfolio) -> dict:
+    """
+    Calculate comprehensive portfolio performance metrics.
+    
+    This function calculates a wide range of metrics including:
+    1. Value and Returns
+        - Total Portfolio Value
+        - Total Investment
+        - Total Return
+        - Annualized Return
+        
+    2. Risk Metrics
+        - Daily Volatility
+        - Annualized Volatility
+        - Sharpe Ratio
+        - Maximum Drawdown
+        
+    3. Portfolio Composition
+        - Number of Positions
+        - Holdings Details
+        
+    Args:
+        portfolio: Portfolio instance with loaded data
+        
+    Returns:
+        dict: Dictionary containing all calculated metrics
+        
+    Example:
+        >>> metrics = calculate_portfolio_metrics(portfolio)
+        >>> print(f"Total Return: {metrics['Total Return (%)']}%")
+    """
     """Calculate comprehensive portfolio metrics"""
     metrics = {
         'Total Value': 'N/A',
@@ -102,6 +163,39 @@ def calculate_portfolio_metrics(portfolio: Portfolio) -> dict:
     return metrics
 
 def calculate_holdings_metrics(portfolio: Portfolio) -> pd.DataFrame:
+    """
+    Calculate detailed metrics for each holding in the portfolio.
+    
+    This function analyzes each position and calculates:
+    1. Position Details
+        - Quantity
+        - Average Price
+        - Current Price
+        
+    2. Value Metrics
+        - Market Value
+        - Cost Basis
+        - Portfolio Weight
+        
+    3. Performance Metrics
+        - Absolute Return
+        - Percentage Return
+        
+    Args:
+        portfolio: Portfolio instance with holdings data
+        
+    Returns:
+        DataFrame with columns:
+        - Symbol: Stock symbol
+        - Quantity: Number of shares
+        - Avg Price: Average purchase price
+        - Current Price: Latest market price
+        - Market Value: Current position value
+        - Cost Basis: Total investment
+        - Absolute Return: Profit/Loss
+        - Return %: Percentage return
+        - Weight %: Portfolio weight
+    """
     """Calculate detailed metrics for each holding"""
     if portfolio.holdings is None or portfolio.holdings.empty:
         return pd.DataFrame()
@@ -165,6 +259,42 @@ def calculate_holdings_metrics(portfolio: Portfolio) -> pd.DataFrame:
     return holdings_df
 
 def format_metrics_output(metrics: dict) -> str:
+    """
+    Format portfolio metrics into a readable report.
+    
+    This function creates a formatted report with:
+    1. Report Header
+        - Title
+        - Generation Timestamp
+        
+    2. Portfolio Overview
+        - Total Value and Investment
+        - Returns and Position Count
+        
+    3. Risk Metrics
+        - Volatility
+        - Sharpe Ratio
+        - Maximum Drawdown
+        
+    4. Holdings Summary
+        - Individual position details
+        - Performance metrics
+        
+    Args:
+        metrics: Dictionary of calculated metrics
+        
+    Returns:
+        str: Formatted report string
+        
+    Example:
+        >>> report = format_metrics_output(metrics)
+        >>> print(report)
+        ===============================
+        Portfolio Evaluation Report
+        Generated on: 2024-01-28 10:00:00
+        ===============================
+        ...
+    """
     """Format metrics for display"""
     output = []
     
@@ -247,6 +377,27 @@ def format_metrics_output(metrics: dict) -> str:
     return "\n".join(output)
 
 def main():
+    """
+    Main function to run portfolio evaluation.
+    
+    This function:
+    1. Sets up logging
+    2. Creates portfolio instance
+    3. Loads transaction data
+    4. Calculates metrics
+    5. Generates visualizations
+    6. Saves reports
+    
+    The function handles:
+    - File loading errors
+    - Data validation
+    - Report generation
+    - Error logging
+    
+    Example:
+        $ python evaluate_portfolio.py
+    """
+    """Run portfolio evaluation"""
     # Set up logging
     os.makedirs('logs', exist_ok=True)
     log_file = os.path.join('logs', 'portfolio_evaluation.log')
