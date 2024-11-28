@@ -46,6 +46,9 @@ error.log
 error_report.json
 *.json
 
+# Images
+images/
+
 # Exceptions - files to keep in git
 !requirements.txt
 !config.json

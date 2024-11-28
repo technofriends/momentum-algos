@@ -9,7 +9,7 @@ MAX_WORKERS = 50
 DOWNLOAD_DELAY = 0
 
 # Maximum retries for failed downloads
-MAX_RETRIES = 0
+MAX_RETRIES = 3
 
 # Delay between retries (in seconds)
 RETRY_DELAY = 2.0
